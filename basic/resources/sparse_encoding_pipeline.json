@@ -1,0 +1,14 @@
+{
+  "description": "This is a test pipeline",
+	"processors": [
+			{
+					"sparse_encoding": {
+							"model_id": "{{model_id}}",
+							"field_map": {
+									"text": "passage_embedding"
+							},
+							"ignore_failure": false
+					}
+			}
+  ]
+}

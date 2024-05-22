@@ -1,0 +1,25 @@
+{
+	"protocol": "aws_sigv4",
+	"name": "sagemaker: embedding",
+	"description": "Connector for Sagemaker",
+	"version": "1",
+	"parameters": {
+		"service_name": "sagemaker",
+		"region": "{{aws_region}}"
+	},
+	"credential": {
+		"access_key": "{{aws_access_key}}",
+ 		"secret_key": "{{aws_secret_key}}"
+	},
+	"actions": [
+		{
+			"headers": {
+				"content-type": "application/json"
+			},
+			"method": "POST",
+			"request_body": "${parameters.input}",
+			"action_type": "PREDICT",
+			"url": "{{aws_endpoint}}"
+		}
+	]
+}

@@ -1,0 +1,16 @@
+certifi==2024.2.2
+charset-normalizer==3.3.2
+decorator==5.1.1
+idna==3.7
+iniconfig==2.0.0
+Jinja2==3.1.4
+MarkupSafe==2.1.5
+opensearch-py==2.5.0
+packaging==24.0
+pluggy==1.5.0
+pytest==8.2.1
+python-dateutil==2.9.0.post0
+python-dotenv==1.0.1
+requests==2.32.1
+six==1.16.0
+urllib3==1.26.18
