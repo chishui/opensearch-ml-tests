@@ -1,0 +1,18 @@
+{
+  "settings": {
+    "default_pipeline": "{{pipeline}}"
+  },
+  "mappings": {
+    "properties": {
+      "id": {
+        "type": "text"
+      },
+      "passage_embedding": {
+        "type": "rank_features"
+      },
+      "text": {
+        "type": "text"
+      }
+    }
+  }
+}

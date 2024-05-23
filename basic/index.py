@@ -10,3 +10,10 @@ class Index:
     @trace
     def delete(self):
         return client.http.delete(f"/{self.index}")
+
+    @trace
+    def create(self, pipeline, template_file="sparse_index.json"):
+        template = jinja2.Template(read_resource(template_file))
+        body = template.render(pipeline=pipeline)
+        body = json.loads(body)
+        return client.http.put(f"/{self.index}", body=body)

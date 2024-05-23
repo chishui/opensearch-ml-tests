@@ -25,13 +25,17 @@ class Connector:
 
 
 class SageMakerConnector(Connector):
-    def __init__(self):
+    def __init__(self, step_size=None):
         super().__init__()
+        other_parameters = ""
+        if step_size != None:
+            other_parameters = f'\n"input_docs_processed_step_size": {step_size},\n'
         body = jinja2.Template(read_resource("sagemaker_connector.json"))
         body = body.render(aws_region=os.getenv("AWS_REGION"), 
                     aws_access_key=os.getenv("AWS_ACCESS_KEY"),
                     aws_secret_key=os.getenv("AWS_SECRET_KEY"),
-                    aws_endpoint=os.getenv("SAGEMAKER_ENDPOINT"))
+                    aws_endpoint=os.getenv("SAGEMAKER_ENDPOINT"),
+                           other_parameters=other_parameters)
         self.body = json.loads(body)
         self.connector_id = None
 

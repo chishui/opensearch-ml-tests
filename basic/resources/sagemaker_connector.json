@@ -4,7 +4,7 @@
 	"description": "Connector for Sagemaker",
 	"version": "1",
 	"parameters": {
-		"service_name": "sagemaker",
+		"service_name": "sagemaker",{{other_parameters}}
 		"region": "{{aws_region}}"
 	},
 	"credential": {

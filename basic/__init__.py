@@ -4,7 +4,12 @@ from . import resources
 from opensearchpy import OpenSearch
 from dotenv import load_dotenv
 
-load_dotenv()
+dotfile = os.environ.get("DOT_FILE", None)
+if dotfile != None:
+    load_dotenv(dotfile)
+else:
+    load_dotenv()
+
 
 port = 9200
 host = os.environ.get('OPENSEARCH_URL', 'localhost')

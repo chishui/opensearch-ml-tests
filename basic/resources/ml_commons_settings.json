@@ -1,0 +1,12 @@
+{
+  "persistent": {
+    "plugins": {
+      "ml_commons": {
+        "only_run_on_ml_node": "{{only_run_on_ml_node}}",
+        "model_access_control_enabled": "true",
+        "native_memory_threshold": "99",
+				"connector_access_control_enabled": "false"
+      }
+    }
+  }
+}
