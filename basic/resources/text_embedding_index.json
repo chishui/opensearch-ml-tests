@@ -1,0 +1,33 @@
+{
+  "settings": {
+    "default_pipeline": "{{pipeline}}",
+		"index": {
+				"knn": true,
+				"knn.algo_param.ef_search": 100,
+				"refresh_interval": "30s",
+				"default_pipeline": "{{pipeline}}"
+		},
+		"number_of_shards": 1,
+		"number_of_replicas": 0
+  },
+  "mappings": {
+      "properties": {
+      "text": {
+        "type": "text"
+      },
+      "text_knn": {
+        "type": "knn_vector",
+        "dimension": {{dimension}},
+        "method": {
+          "name": "hnsw",
+          "space_type": "l2",
+          "engine": "lucene",
+          "parameters": {
+            "ef_construction": 128,
+            "m": 24
+          }
+        }
+      }
+    }
+  }
+}

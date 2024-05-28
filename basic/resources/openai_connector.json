@@ -1,0 +1,34 @@
+{
+	"name": "OpenAI embedding Connector",
+	"version": "1",
+	"description": "The connector to public OpenAI model service for GPT 3.5",
+  "client_config": {
+    "max_connection": 50,
+    "connection_timeout": 50000,
+    "read_timeout": 50000
+  },
+	"protocol": "http",
+	"parameters": {
+		"endpoint": "api.openai.com",
+		"content_type": "application/json",
+		"max_tokens": "7",
+		"temperature": "0",
+		"model": "text-embedding-ada-002"
+	},
+  "credential": {
+      "openAI_key": "{{openai_key}}"
+  },
+	"actions": [
+		{
+			"action_type": "PREDICT",
+			"method": "POST",
+			"url": "https://${parameters.endpoint}/v1/embeddings",
+			"headers": {
+				"Authorization": "Bearer ${credential.openAI_key}"
+			},
+			"request_body": "{ \"model\": \"${parameters.model}\", \"input\": ${parameters.input}}",
+			"pre_process_function": "connector.pre_process.openai.embedding",
+			"post_process_function": "connector.post_process.openai.embedding"
+		}
+	]
+}

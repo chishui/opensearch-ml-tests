@@ -39,5 +39,16 @@ class SageMakerConnector(Connector):
         self.body = json.loads(body)
         self.connector_id = None
 
+class OpenAIConnector(Connector):
+    def __init__(self):
+        super().__init__()
+        body = jinja2.Template(read_resource("openai_connector.json"))
+        body = body.render(openai_key=os.getenv("OPENAI_KEY"))
+        self.body = json.loads(body)
+        self.connector_id = None
+
+
+
+
 
 

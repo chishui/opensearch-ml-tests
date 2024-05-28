@@ -27,5 +27,14 @@ class SparseEncodingPipeline(Pipeline):
     def get_body(self):
         body = self.body_template.render(model_id=self.model_id) 
         return json.loads(body)
-    
 
+
+class TextEmbeddingPipeline(Pipeline):
+    def __init__(self, pipeline_name, model_id):
+        super().__init__(pipeline_name)
+        self.model_id = model_id
+        self.body_template = jinja2.Template(read_resource("text_embedding_pipeline.json"))
+
+    def get_body(self):
+        body = self.body_template.render(model_id=self.model_id) 
+        return json.loads(body)

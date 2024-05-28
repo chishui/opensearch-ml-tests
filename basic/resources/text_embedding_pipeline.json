@@ -1,0 +1,14 @@
+{
+  "description": "This pipeline is used for benchmark",
+  "processors": [
+			{
+					"text_embedding": {
+							"model_id": "{{model_id}}",
+							"field_map": {
+									"text": "text_knn"
+							},
+							"ignore_failure": false
+					}
+			}
+  ]
+}
