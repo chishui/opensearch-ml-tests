@@ -34,3 +34,11 @@ class Ingest:
         if pipeline is not None:
             url = f"{url}&pipeline={pipeline}"
         return url
+
+    @staticmethod
+    def get_items(response):
+        items = {}
+        for item in response["items"]:
+            items[item["index"]["_id"]] = item
+        return items
+

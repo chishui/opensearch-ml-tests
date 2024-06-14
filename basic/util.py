@@ -61,7 +61,12 @@ def parser(obj, keys):
         if isinstance(obj, list):
             ret = []
             for o in obj:
-                ret.append(get(o, key))
+                try:
+                    ret.append(get(o, key))
+                except KeyError:
+                    pass
+            if len(ret) == 0:
+                raise KeyError
             return ret
         else:
             if key == "*":

@@ -1,0 +1,22 @@
+{
+  "description": "This pipeline is used for benchmark",
+  "processors": [
+    {
+      "drop": {
+          "if": "ctx.text.contains('drop')"
+      }
+    },
+    {
+      "fail": {
+        "if": "ctx.text.contains('fail')",
+        "message": "fail"
+      }
+    },
+    {
+      "set": {
+        "field": "set",
+        "value": true
+      }
+    }
+  ]
+}
