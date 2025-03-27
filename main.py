@@ -84,7 +84,12 @@ query_template = """
 """
 async def run_query(query):
     ret = client.search(body=query, index="test_sinnamon_ann")
-    profile_results = []
+    profile_results = {
+        "took": ret['took'],
+        "profile": []
+    }
+    if 'profile' not in ret:
+        return profile_results
     for shard in ret['profile']['shards']:
         search = shard['searches'][0]
         bool_query = search['query'][0]
@@ -96,7 +101,7 @@ async def run_query(query):
             children_time.setdefault(child['type'], 0)
             children_time[child['type']] += child['time_in_nanos'] / 1000000
 
-        profile_results.append({
+        profile_results['profile'].append({
             "query_time": query_time,
             "children_time": children_time,
             "collect": search["collector"][0]["time_in_nanos"]/1000000
@@ -117,6 +122,8 @@ async def benchmark():
 
     ann = []
     normal = []
+    ann_profile = []
+    normal_profile = []
     sample_count = 100
     for i in range(sample_count):
         simple_progress(i, sample_count)
@@ -130,9 +137,12 @@ async def benchmark():
             run_query(query_template.replace("{{query}}", body).replace("{{ann}}", "true").replace("{{ratio}}", "0.1")),
             run_query(query_template.replace("{{query}}", body).replace("{{ann}}", "false").replace("{{ratio}}", "0.1"))
         )
+        ann.append(results[0]['took'])
+        normal.append(results[1]['took'])
         shard = 0
-        ann.append(results[0][shard]['query_time'])
-        normal.append(results[1][shard]['query_time'])
+        if 'profile' in results[0]:
+            ann_profile.append(results[0]['profile'][shard]['query_time'])
+            normal_profile.append(results[1]['profile'][shard]['query_time'])
 
     # Replace the original print with:
     print(f"ANN mean query time: {np.mean(ann):.4f}")
