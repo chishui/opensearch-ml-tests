@@ -1,7 +1,8 @@
 import json
 import jinja2
+import sys
 from basic import client, read_resource
-from basic.util import wait_task, trace
+from basic.util import wait_task, trace, logger
 
 class Ingest:
     def __init__(self, index):
@@ -16,14 +17,15 @@ class Ingest:
         url = self._get_bulk_url(batch_size, pipeline)
         return client.http.post(url, body=self.bulk_body)
 
-    @trace
     def bulk_items(self, items, batch_size=None, pipeline=None):
         url = self._get_bulk_url(batch_size, pipeline)
         body = ""
         for item in items:
             body = body + self.bulk_item_template.render(index=self.index,
                                                   id=item["id"],
-                                                  text=item["text"]) 
+                                                  text=item["text"])
+        
+        logger.info(f"bulk payload size: {sys.getsizeof(body)}")
         return client.http.post(url, body=body)
 
 

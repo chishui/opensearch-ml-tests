@@ -32,3 +32,7 @@ class Cluster:
         def ml(self):
             return client.http.get("/_plugins/_ml/stats")
 
+        @trace
+        def jvm(self):
+            return client.http.get("/_nodes/stats/jvm")
+

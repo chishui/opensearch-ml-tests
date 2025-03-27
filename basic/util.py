@@ -48,7 +48,6 @@ def is_complete(res):
 
 @decorator
 def trace(func, *args, **kw):
-
     logger.debug(f"before run: {func.__module__}:{func.__qualname__}")
     res = func(*args, **kw)
     logger.debug(f"after run: {func.__module__}:{func.__qualname__}")

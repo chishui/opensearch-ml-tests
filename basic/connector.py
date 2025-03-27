@@ -5,8 +5,8 @@ from basic import client, read_resource
 from basic.util import trace
 
 class Connector:
-    def __init__(self):
-        self.connector_id = None
+    def __init__(self, connector_id=None):
+        self.connector_id = connector_id
         self.body = None
 
     @trace

@@ -7,8 +7,8 @@ from basic.util import wait_task, trace
 
 
 class Model:
-    def __init__(self):
-        self.model_id = None
+    def __init__(self, model_id=None):
+        self.model_id = model_id
         self.model_group_id = None
 
     @trace

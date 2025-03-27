@@ -25,11 +25,23 @@ class Doc:
 
 
     @trace
-    def create_by_id(self, doc_id, text, pipeline=None):
-        body = self.doc_template.render(text=text)
-        url = f"/{self.index}/_doc/{doc_id}?refresh=true"
+    def create_by_id(self, doc_id, text, pipeline=None, body=None, refresh=True):
+        if body is None:
+            body = self.doc_template.render(text=text)
+        refresh_txt = "true" if refresh else "false"
+        url = None
+        if doc_id:
+            url = f"/{self.index}/_doc/{doc_id}?refresh={refresh_txt}"
+        else:
+             url = f"/{self.index}/_doc"
         if pipeline is not None:
             url = f"{url}&pipeline={pipeline}"
         res = client.http.post(url, body=json.loads(body))
+        return res
+
+    @trace
+    def remove_all_docs(self):
+        body = { "query": { "match_all": {} } }
+        res = client.http.post(f"/{self.index}/_delete_by_query?refresh=true", body=body)
         return res
 
