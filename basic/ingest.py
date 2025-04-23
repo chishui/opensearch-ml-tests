@@ -13,9 +13,9 @@ class Ingest:
         self.bulk_item_template = jinja2.Template(read_resource("bulk_item.json"))
 
     @trace
-    def bulk(self, batch_size=None, pipeline=None):
-        url = self._get_bulk_url(batch_size, pipeline)
-        return client.http.post(url, body=self.bulk_body)
+    def bulk(self, body=None, refresh=True, pipeline=None):
+        url = self._get_bulk_url(pipeline, refresh)
+        return client.http.post(url, body=body if body is not None else self.bulk_body)
 
     def bulk_items(self, items, batch_size=None, pipeline=None):
         url = self._get_bulk_url(batch_size, pipeline)
@@ -29,12 +29,15 @@ class Ingest:
         return client.http.post(url, body=body)
 
 
-    def _get_bulk_url(self, batch_size, pipeline):
-        url = "/_bulk?refresh=true"
-        if batch_size is not None:
-            url = f"{url}&batch_size={batch_size}"
+    def _get_bulk_url(self, pipeline, refresh=True):
+        url = "/_bulk"
+        params = {}
+        if refresh:
+            params["refresh"] = "true"
         if pipeline is not None:
-            url = f"{url}&pipeline={pipeline}"
+            params["pipeline"] = pipeline
+        if len(params) > 0:
+            url = url + "?" + "&".join([f"{k}={v}" for k, v in params.items()])
         return url
 
     @staticmethod

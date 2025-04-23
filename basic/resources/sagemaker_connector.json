@@ -7,6 +7,11 @@
 		"service_name": "sagemaker",{{other_parameters}}
 		"region": "{{aws_region}}"
 	},
+  "client_config": {
+    "max_connection": 20,
+    "connection_timeout": 50000,
+    "read_timeout": 50000
+  },
 	"credential": {
 		"access_key": "{{aws_access_key}}",
  		"secret_key": "{{aws_secret_key}}"

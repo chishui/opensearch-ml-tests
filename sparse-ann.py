@@ -5,6 +5,7 @@ import json
 import time
 import asyncio
 import numpy as np
+from basic.bench import Bench
 
 def run():
     doc = Doc("test-liyun")
@@ -70,19 +71,16 @@ def test_aoss():
 query_template = """
 {
     "query": {
-        "neural_sparse": {
+        "sparse_ann": {
             "passage_embedding": {
-                "query_tokens": {{query}},
-                "search_cluster": {{ann}},
-                "document_ratio": {{ratio}},
-                "sketch_type": "Sinnamon"
+                "query_tokens": {{query}}
             }
         }
     }
 }
 """
 async def run_query(query):
-    ret = client.search(body=query, index="test_sinnamon_ann")
+    ret = client.search(body=query, index="test-index")
     profile_results = {
         "took": ret['took'],
         "profile": []
@@ -113,41 +111,24 @@ def simple_progress(current, total):
     print(f'Progress: {percent}% [{current}/{total}]\r', end='', flush=True)
 
 
-async def benchmark():
-    import urllib3
-    urllib3.disable_warnings()
-    from sparse.dataloader import read_sparse_matrix, sparse_vector_to_json
-    X = read_sparse_matrix("queries.dev.csr")
+doc_template = """
+{
+    "passage_embedding": {{embedding}}
+}
+"""
 
-    ann = []
-    normal = []
-    ann_profile = []
-    normal_profile = []
-    sample_count = 100
-    for i in range(sample_count):
-        simple_progress(i, sample_count)
-        # generate random number
-
-        idx = np.random.randint(0, X.shape[0])
-
-        body = sparse_vector_to_json(X[idx])
-        # make two different query with different parameter and record their responses, they should be run in separate thread
-        results = await asyncio.gather(
-            run_query(query_template.replace("{{query}}", body).replace("{{ann}}", "true").replace("{{ratio}}", "0.1")),
-#            run_query(query_template.replace("{{query}}", body).replace("{{ann}}", "false").replace("{{ratio}}", "0.1"))
-        )
-        ann.append(results[0]['took'])
-        if len(results) > 0:
-            normal.append(results[1]['took'])
-        # shard = 0
-        # if 'profile' in results[0] and len(results[0]['profile']) > 0:
-        #     ann_profile.append(results[0]['profile'][shard]['query_time'])
-        #     normal_profile.append(results[1]['profile'][shard]['query_time'])
-
-    # Replace the original print with:
-    print(f"ANN mean query time: {np.mean(ann):.4f}")
-    print(f"Normal mean query time: {np.mean(normal):.4f}")
+def ingest_msmarco(size):
+    import logging
+    logging.basicConfig()
+    def data_generator():
+        from sparse.dataloader import read_sparse_matrix, sparse_vector_to_json
+        X = read_sparse_matrix("base_small.csr")
+        for i in range(size):
+            vec = sparse_vector_to_json(X[i])
+            yield json.loads(doc_template.replace("{{embedding}}", vec))
+    bench = Bench("test-index")
+    bench.bulk(data_generator(), 100)
 
 
 if __name__ == "__main__":
-    asyncio.run(benchmark())
+    ingest_msmarco(100000)

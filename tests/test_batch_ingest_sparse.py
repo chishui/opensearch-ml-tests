@@ -1,25 +1,27 @@
 import os
+import json
 import uuid
+import time
 import unittest
-import platform
+import itertools
 from wonderwords import RandomSentence
 from basic import client
-from basic.connector import OpenAIConnector
+from basic.connector import SageMakerConnector
 from basic.model import RemoteModel, LocalModel
-from basic.pipeline import TextEmbeddingPipeline
+from basic.pipeline import SparseEncodingPipeline
 from basic.ingest import Ingest
 from basic.doc import Doc
-from basic.index import DenseIndex
+from basic.index import SparseIndex
 from basic.cluster import Cluster
 from basic.util import parser
-from tests.matcher import text_embedding_match
+from tests.matcher import sparse_embedding_match
 
-TEXT_EMBEDDING_PROCESSOR = "text_embedding"
+SPARSE_PROCESSOR = "sparse_encoding"
 
-class BatchIngestWithTextEmbedding(unittest.TestCase):
+class BatchIngest(unittest.TestCase):
     maxDiff = None
     def __init__(self, *args, **kwargs):
-        super(BatchIngestWithTextEmbedding, self).__init__(*args, **kwargs)
+        super(BatchIngest, self).__init__(*args, **kwargs)
         self.connector = None
         self.model = None
         self.pipeline = None
@@ -47,41 +49,49 @@ class BatchIngestWithTextEmbedding(unittest.TestCase):
         self.pipeline = None
         self.index = None
 
-    def test_remote_text_embedding_batch(self):
+    def test_remote_sparse_batch(self):
         index = str(uuid.uuid4())
         pipeline_name = str(uuid.uuid4())
         # prepare
         self._prepare_connector_model_pipeline(index, pipeline_name)
         # ingest and verify
-        self._ingest_doc_and_verify(index, bulk_size=3, processor_name=TEXT_EMBEDDING_PROCESSOR) 
+        self._ingest_doc_and_verify(index, batch_size=3, processor_name=SPARSE_PROCESSOR) 
 
-    def test_remote_text_embedding_batch_with_step_size(self):
+    def test_large_remote_sparse_batch(self):
+        index = str(uuid.uuid4())
+        pipeline_name = str(uuid.uuid4())
+        # prepare
+        self._prepare_connector_model_pipeline(index, pipeline_name)
+        # ingest and verify
+        self._ingest_doc_and_verify(index, batch_size=102, processor_name=SPARSE_PROCESSOR, total_doc=1024) 
+
+    def test_remote_sparse_batch_with_step_size(self):
         index = str(uuid.uuid4())
         pipeline_name = str(uuid.uuid4())
         # prepare
         step_size = 2
         self._prepare_connector_model_pipeline(index, pipeline_name, step_size=step_size)
         # ingest and verify
-        self._ingest_doc_and_verify(index, bulk_size=5, processor_name=TEXT_EMBEDDING_PROCESSOR, step_size=step_size)
+        self._ingest_doc_and_verify(index, batch_size=5, processor_name=SPARSE_PROCESSOR, step_size=step_size)
 
-    def test_local_text_embedding_batch(self):
+    def test_local_sparse_batch(self):
         index = str(uuid.uuid4())
         pipeline_name = str(uuid.uuid4())
         # prepare
         self._prepare_local_model_pipeline(index, pipeline_name)
         # ingest and verify
-        self._ingest_doc_and_verify(index, bulk_size=5, processor_name=TEXT_EMBEDDING_PROCESSOR)
+        self._ingest_doc_and_verify(index, batch_size=5, processor_name=SPARSE_PROCESSOR)
 
     @unittest.skip
     def test_(self):
-        s = OpenAIConnector()
+        s = SageMakerConnector(2)
         s.create()
         self.assertTrue(False)
 
-    def _get_expected_batch_size(self, doc_size, bulk_size, step_size):
+    def _get_expected_batch_size(self, doc_size, batch_size, step_size):
         # now we don't have requests metrics for sub batches cut by step_size, return len(bulks) for now
-        return len(list(range(0, doc_size, bulk_size)))
-        bulks = list(range(0, doc_size+1, bulk_size))
+        return len(list(range(0, doc_size, batch_size)))
+        bulks = list(range(0, doc_size+1, batch_size))
         if step_size is None or step_size == 0:
             return len(bulks)
 
@@ -91,18 +101,17 @@ class BatchIngestWithTextEmbedding(unittest.TestCase):
             total = total + len(list(range(0, bulks[i+1]-bulks[i], step_size)))
         return total
 
-    def _ingest_doc_and_verify(self, index, bulk_size, processor_name, step_size=None):
+    def _ingest_doc_and_verify(self, index, batch_size, processor_name, step_size=None, total_doc=10):
         # index through bulk
         ingest = Ingest(index)
         docs = []
         s = RandomSentence()
-        total_doc = 10
         for i in range(total_doc):
             docs.append({"id": "batch_"+str(i+1), "text": s.sentence()})
-        ingest.bulk_items(docs, bulk_size, self.pipeline.pipeline_name)
+        ingest.bulk_items(docs, batch_size, self.pipeline.pipeline_name)
         # verify ingest stats
         ret = self.cluster.stats.ingest()
-        stats = parser(ret, ["nodes", "*", "ingest", "pipelines", self.pipeline.pipeline_name, "processors", "text_embedding", "stats"])
+        stats = parser(ret, ["nodes", "*", "ingest", "pipelines", self.pipeline.pipeline_name, "processors", "sparse_encoding", "stats"])
         total_count = sum([n["count"] for n in stats])
         total_failure = sum([n["failed"] for n in stats])
         self.assertEqual(total_doc, total_count)
@@ -111,7 +120,7 @@ class BatchIngestWithTextEmbedding(unittest.TestCase):
         ret = self.cluster.stats.ml()
         stats = parser(ret, ["nodes", "*", "models", self.model.model_id, "predict", "ml_action_request_count"])
         total_predict = sum(stats)
-        self.assertEqual(self._get_expected_batch_size(total_doc, bulk_size, step_size), total_predict)
+        self.assertEqual(self._get_expected_batch_size(total_doc, batch_size, step_size), total_predict)
         # verify inference data
         self._verify_inference_data(docs, index, self.pipeline.pipeline_name)
 
@@ -125,13 +134,13 @@ class BatchIngestWithTextEmbedding(unittest.TestCase):
             doc_through_single = doc.get_by_id(str(i+1))
             doc_through_bulk = doc.get_by_id("batch_"+str(i+1))
             # the float accuracy is different for the same data in a bulk request and in a single request, so we only compare keys
-            text_embedding_match(doc_through_single, doc_through_bulk)
+            sparse_embedding_match(doc_through_single["_source"]["passage_embedding"], doc_through_bulk["_source"]["passage_embedding"])
 
 
     def _prepare_connector_model_pipeline(self, index, pipeline_name, step_size=None):
-        self.index = DenseIndex(index, 1536)
+        self.index = SparseIndex(index)
 
-        self.connector = OpenAIConnector()
+        self.connector = SageMakerConnector(step_size=step_size)
         self.connector.create()
 
         self.model = RemoteModel(self.connector)
@@ -139,7 +148,7 @@ class BatchIngestWithTextEmbedding(unittest.TestCase):
         self.model.register()
         self.model.deploy()
 
-        self.pipeline = TextEmbeddingPipeline(pipeline_name, self.model.model_id) 
+        self.pipeline = SparseEncodingPipeline(pipeline_name, self.model.model_id) 
         self.pipeline.create()
 
         self.index.create(pipeline_name)
@@ -147,15 +156,18 @@ class BatchIngestWithTextEmbedding(unittest.TestCase):
     def _prepare_local_model_pipeline(self, index, pipeline_name):
         self.cluster.settings.ml_commons(only_run_on_ml_node=False)
 
-        self.index = DenseIndex(index, 384)
+        self.index = SparseIndex(index)
 
-        self.model = LocalModel("local_dense_model.json")
+        self.model = LocalModel()
         self.model.register_group(str(uuid.uuid4()))
         self.model.register()
         self.model.deploy()
 
-        self.pipeline = TextEmbeddingPipeline(pipeline_name, self.model.model_id) 
+        self.pipeline = SparseEncodingPipeline(pipeline_name, self.model.model_id) 
         self.pipeline.create()
 
         self.index.create(pipeline_name)
 
+
+if __name__ == '__main__':
+    unittest.main()
