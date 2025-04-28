@@ -6,6 +6,12 @@ import time
 import asyncio
 import numpy as np
 from basic.bench import Bench
+import click
+
+@click.group()
+def cli():
+    """Main command group"""
+    pass
 
 def run():
     doc = Doc("test-liyun")
@@ -113,22 +119,119 @@ def simple_progress(current, total):
 
 doc_template = """
 {
-    "passage_embedding": {{embedding}}
+    "passage_embedding": {{embedding}},
+    "sparse_embedding": {{embedding}}
 }
 """
 
-def ingest_msmarco(size):
+def render_template(template, params):
+    for k, v in params.items():
+        template = template.replace("{{" + k + "}}", v)
+    return json.loads(template)
+
+def sparse_vector_generator(file, size, transform = None):
+    from sparse.dataloader import read_sparse_matrix, sparse_vector_to_json
+    X = read_sparse_matrix(file)
+    if size == 0:
+        size = X.shape[0]
+    for i in range(size):
+        vec = sparse_vector_to_json(X[i])
+        if transform is None:
+            yield (i, vec)
+        else:
+            yield (i, transform(vec))
+
+@cli.command()
+@click.option("--index-name", help="index name")
+@click.option("--data-file", help="data file name")
+@click.option("--size", help="size", type=int, default=0)
+@click.option("--bulk-size", help="bulk size", type=int, default=1000)
+def ingest_msmarco(index_name, data_file, size, bulk_size):
     import logging
     logging.basicConfig()
-    def data_generator():
-        from sparse.dataloader import read_sparse_matrix, sparse_vector_to_json
-        X = read_sparse_matrix("base_small.csr")
-        for i in range(size):
-            vec = sparse_vector_to_json(X[i])
-            yield json.loads(doc_template.replace("{{embedding}}", vec))
+    bench = Bench(index_name)
+    bench.bulk(sparse_vector_generator(data_file, size, 
+                                       lambda v : render_template(doc_template, {"embedding": v})), bulk_size)
+
+
+index_template = """
+{
+  "settings": {
+      "index": {
+          "sparse": true,
+          "number_of_shards": 1
+      }
+  },
+  "mappings": {
+    "properties": {
+      "sparse_embedding":{
+          "type": "rank_features"
+      },
+      "passage_embedding":{
+          "type": "sparse_tokens",
+          "method": {
+              "name": "seismic",
+              "lambda": 20,
+              "alpha": 0.4,
+              "beta": 5
+          }
+      }
+    }
+  }
+}
+"""
+
+sparse_query_template = """
+{  
+    "_source": {
+        "excludes": [
+            "sparse_embedding"
+        ]
+    },
+    "query": {
+        "neural_sparse": {
+            "sparse_embedding": {
+                "query_tokens": {{vector}}
+            }
+        }
+    },
+    "size": 10
+}
+"""
+
+sparse_ann_query_template = """
+{
+    "_source": {
+        "excludes": [
+            "passage_embedding"
+        ]
+    },
+    "query": {
+        "sparse_ann": {
+            "passage_embedding": {
+                "query_tokens": {{vector}}
+            }
+        }
+    },
+    "size": 10
+}
+"""
+
+def create_index():
+    index = SparseIndex("test-index")
+    index.create(index_template)
+
+def query_compare(size):
     bench = Bench("test-index")
-    bench.bulk(data_generator(), 100)
+    sparse_queries = sparse_vector_generator("query.csr", size, lambda v : sparse_query_template.replace("{{vector}}", v))
+    ann_queries = sparse_vector_generator("query.csr", size, lambda v : sparse_ann_query_template.replace("{{vector}}", v))
+  
+    sparse_results = bench.search(sparse_queries)
+    ann_results = bench.search(ann_queries)
+
+
+
 
 
 if __name__ == "__main__":
-    ingest_msmarco(100000)
+    cli()

@@ -19,6 +19,7 @@ host = os.environ.get('OPENSEARCH_URL', 'localhost')
 auth = (os.environ.get('OPENSEARCH_USERNAME', 'admin'), os.environ.get('OPENSEARCH_PASSWORD', 'admin'))
 USE_SSL = os.environ.get('SSL', '0') == '1'
 USE_AWS = os.environ.get('AWS', '0') == '1'
+timeout = int(os.environ.get('OPENSEARCH_TIMEOUT', '60'))
 
 common_args = {
     'hosts' : [{'host': host, 'port': port}],
@@ -26,8 +27,11 @@ common_args = {
     'pool_options' : {
         'maxsize': 25,  # Increase the connection pool size
         'retry_on_timeout': True,
-        'timeout': 30
-    }
+        'timeout': timeout
+    },
+    'timeout': timeout,  # Overall request timeout
+    'retry_on_timeout': True,
+    'max_retries': 3
 }
 
 if USE_AWS:
