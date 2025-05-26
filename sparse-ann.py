@@ -7,6 +7,8 @@ import asyncio
 import numpy as np
 from basic.bench import Bench
 import click
+from basic.my_logger import logger
+import statistics
 
 @click.group()
 def cli():
@@ -62,17 +64,6 @@ def prepare_query():
     with open("output.json", "w") as fout:
         fout.write(json.dumps(output))
 
-def test_aoss():
-    doc = Doc("test-liyun")
-    d = doc.get_by_id("1%3A0%3A3ZZGZZUBHtrcbbp3udZm")
-    print(d)
-    # Load model directly
-    from transformers import AutoTokenizer, AutoModelForMaskedLM
-
-    tokenizer = AutoTokenizer.from_pretrained("opensearch-project/opensearch-neural-sparse-encoding-doc-v2-distill")
-    #model = AutoModelForMaskedLM.from_pretrained("opensearch-project/opensearch-neural-sparse-encoding-doc-v2-distill")
-    ret = tokenizer.encode("hello world", return_tensors="pt")
-    print(ret)
 
 query_template = """
 {
@@ -115,12 +106,13 @@ async def run_query(query):
 def simple_progress(current, total):
     percent = int((current / total) * 100)
     print(f'Progress: {percent}% [{current}/{total}]\r', end='', flush=True)
+    if percent % 10 == 0:  # Log every 10% progress
+        logger.info(f'Progress: {percent}% [{current}/{total}]')
 
 
 doc_template = """
 {
-    "passage_embedding": {{embedding}},
-    "sparse_embedding": {{embedding}}
+    "passage_embedding": {{embedding}}
 }
 """
 
@@ -134,8 +126,8 @@ def sparse_vector_generator(file, size, transform = None):
     X = read_sparse_matrix(file)
     if size == 0:
         size = X.shape[0]
-    for i in range(size):
-        vec = sparse_vector_to_json(X[i])
+    for i in range(0, size):
+        vec = sparse_vector_to_json(X[i % X.shape[0]])
         if transform is None:
             yield (i, vec)
         else:
@@ -146,12 +138,13 @@ def sparse_vector_generator(file, size, transform = None):
 @click.option("--data-file", help="data file name")
 @click.option("--size", help="size", type=int, default=0)
 @click.option("--bulk-size", help="bulk size", type=int, default=1000)
-def ingest_msmarco(index_name, data_file, size, bulk_size):
-    import logging
-    logging.basicConfig()
-    bench = Bench(index_name)
+@click.option("--clients", help="number of clients", type=int, default=1)
+def ingest_msmarco(index_name, data_file, size, bulk_size, clients):
+    logger.info(f"Starting ingestion with index={index_name}, data_file={data_file}, size={size}, bulk_size={bulk_size}, clients={clients}")
+    bench = Bench(index_name, process_size=clients)
     bench.bulk(sparse_vector_generator(data_file, size, 
                                        lambda v : render_template(doc_template, {"embedding": v})), bulk_size)
+    logger.info("Ingestion completed")
 
 
 index_template = """
@@ -191,7 +184,7 @@ sparse_query_template = """
     "query": {
         "neural_sparse": {
             "sparse_embedding": {
-                "query_tokens": {{vector}}
+                "query_tokens": {{embedding}}
             }
         }
     },
@@ -201,15 +194,13 @@ sparse_query_template = """
 
 sparse_ann_query_template = """
 {
-    "_source": {
-        "excludes": [
-            "passage_embedding"
-        ]
-    },
+    "_source": false,
     "query": {
         "sparse_ann": {
             "passage_embedding": {
-                "query_tokens": {{vector}}
+                "query_tokens": {{embedding}},
+                "cut": {{cut}},
+                "heap_factor": 1.2
             }
         }
     },
@@ -228,9 +219,120 @@ def query_compare(size):
   
     sparse_results = bench.search(sparse_queries)
     ann_results = bench.search(ann_queries)
+    
+    # Calculate and display latency statistics for sparse queries
+    sparse_latency_stats = calculate_latency_stats(sparse_results)
+    logger.info("Sparse Query Latency Report:")
+    logger.info(f"  Total Queries: {sparse_latency_stats['count']}")
+    logger.info(f"  Mean Latency: {sparse_latency_stats['mean']:.2f} ms")
+    logger.info(f"  P50 Latency: {sparse_latency_stats['p50']:.2f} ms")
+    logger.info(f"  P90 Latency: {sparse_latency_stats['p90']:.2f} ms")
+    logger.info(f"  P99 Latency: {sparse_latency_stats['p99']:.2f} ms")
+    
+    # Calculate and display latency statistics for ANN queries
+    ann_latency_stats = calculate_latency_stats(ann_results)
+    logger.info("ANN Query Latency Report:")
+    logger.info(f"  Total Queries: {ann_latency_stats['count']}")
+    logger.info(f"  Mean Latency: {ann_latency_stats['mean']:.2f} ms")
+    logger.info(f"  P50 Latency: {ann_latency_stats['p50']:.2f} ms")
+    logger.info(f"  P90 Latency: {ann_latency_stats['p90']:.2f} ms")
+    logger.info(f"  P99 Latency: {ann_latency_stats['p99']:.2f} ms")
 
 
+def evaluate(data, truth_file, k=10):
+    #logger.info(f"Evaluating results against truth file: {truth_file}")
+    correct = np.loadtxt(truth_file, delimiter=",").astype(int)
+    #logger.info(f"Loaded truth data with shape: {correct.shape}")
+    
+    recalls = np.zeros(len(data))
+    for i in range(len(data)):
+        # Convert both to Python int for consistent comparison
+        #logger.debug(f"{i}th truth entry: {correct[i]}")
+        #logger.debug(f"{i}th result entry: {data[i]}")
+        data_set = set(int(x) for x in data[i])
+        correct_set = set(int(x) for x in correct[i])
+        recalls[i] = len(data_set & correct_set)
+        #logger.debug(f"{i}th recall: {recalls[i]}\n")
+    
+    ret = np.mean(recalls) / float(k)
+    logger.info(f"Evaluation complete. Mean recall@{k}: {ret:.4f}")
+    return ret
 
+def calculate_latency_stats(results):
+    """
+    Calculate latency statistics from search results
+    
+    Args:
+        results: List of search results with latency information
+        
+    Returns:
+        Dictionary containing mean, p50, p90, and p99 latency statistics
+    """
+    latencies = [result['latency_ms'] for result in results]
+    
+    if not latencies:
+        return {
+            'mean': 0,
+            'p50': 0,
+            'p90': 0,
+            'p99': 0,
+            'count': 0
+        }
+    
+    return {
+        'mean': statistics.mean(latencies),
+        'p50': statistics.median(latencies),
+        'p90': statistics.quantiles(latencies, n=10)[8],  # 9th decile (90%)
+        'p99': statistics.quantiles(latencies, n=100)[98],  # 99th percentile
+        'count': len(latencies)
+    }
+
+@cli.command()
+@click.option("--index-name", help="index name")
+@click.option("--data-file", help="data file name")
+@click.option("--size", help="size", type=int, default=0)
+@click.option("--clients", help="number of clients", type=int, default=1)
+@click.option("--start", help="start from query index", type=int, default=0)
+@click.option("--warmup", help="number of warmup queries to run before benchmarking", type=int, default=0)
+def query(index_name, data_file, size, clients, start, warmup):
+    logger.info(f"Starting query with index={index_name}, data_file={data_file}, size={size}, clients={clients}, warmup={warmup}")
+    bench = Bench(index_name, process_size=clients)
+    
+    # Run warmup queries if specified
+    if warmup > 0:
+        logger.info(f"Running {warmup} warmup queries...")
+        # Generate a subset of queries for warmup
+        warmup_queries = list(sparse_vector_generator(data_file, min(warmup, size), 
+                                       lambda v : render_template(sparse_ann_query_template, {"embedding": v, "cut": "3"})))
+        
+        # Run warmup queries
+        warmup_results = bench.search(warmup_queries)
+        logger.info(f"Warmup completed with {len(warmup_results)} queries")
+    
+    # Run actual benchmark queries
+    results = bench.search(sparse_vector_generator(data_file, size, 
+                                       lambda v : render_template(sparse_ann_query_template, {"embedding": v, "cut": "3"})))
+    logger.info(f"Search completed, processing results")
+    
+    # Calculate and display latency statistics
+    latency_stats = calculate_latency_stats(results)
+    logger.info("Latency Report:")
+    logger.info(f"  Total Queries: {latency_stats['count']}")
+    logger.info(f"  Mean Latency: {latency_stats['mean']:.2f} ms")
+    logger.info(f"  P50 Latency: {latency_stats['p50']:.2f} ms")
+    logger.info(f"  P90 Latency: {latency_stats['p90']:.2f} ms")
+    logger.info(f"  P99 Latency: {latency_stats['p99']:.2f} ms")
+    
+    # Extract search results for evaluation
+    data = []
+    for i, result_with_latency in enumerate(results):
+        result = result_with_latency['result']  # Extract the actual search result
+        one_data = []
+        for hit in result['hits']['hits']:
+            one_data.append(int(hit['_id']))
+        data.append(one_data if len(one_data) > 0 else [-1])
+
+    evaluate(data, 'brutal_array.txt', k=10)
 
 
 if __name__ == "__main__":
