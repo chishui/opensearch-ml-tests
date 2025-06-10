@@ -142,6 +142,8 @@ class Bench:
         total_count = len(futures)
         total_docs = 0
         updated = 0
+        # Collect results first without modifying the deque
+        results = []
         for future in futures:
             try:
                 result = future.result()
@@ -149,21 +151,22 @@ class Bench:
                     if result['errors']:
                         print("********* errors ********")
                         print(result)
-                        # Count this as an error for our tracking
-                        # self.recent_errors.append(True)
                         error_count += 1
+                        results.append(True)  # Error
                     else:
-                        # Record success
-                        self.recent_errors.append(False)
+                        results.append(False)  # Success
                         for item in result['items']:
                             total_docs += 1
                             if item["index"]["_version"] > 1:
                                 updated += 1
             except Exception as e:
                 print(f"An error occurred: {e}")
-                # Record the error in our tracking
-                self.recent_errors.append(True)
                 error_count += 1
+                results.append(True)  # Error
+        
+        # Now update the deque all at once
+        for result in results:
+            self.recent_errors.append(result)
         
         # Log error rate for monitoring
         if self.recent_errors:
@@ -177,6 +180,8 @@ class Bench:
         i = 1
         total_docs = 0
         total_bulks = 0
+        start_time = time.time()
+        
         for batch in self.batch_generator(payload_generator, bulk_size):
             batch.append("")
             print(f'batch: {i}\r', end='', flush=True)
@@ -188,6 +193,8 @@ class Bench:
             future = self.thread_pool.submit(self._run_with_backoff, partial(run_bulk, batch))
             self.futures.append(future)
             i += 1
+            total_docs += bulk_size
+            total_bulks += 1
             
             # Check if we need to pause due to high error rate before submitting next batch
             if self._should_backoff():
@@ -197,7 +204,22 @@ class Bench:
          
         self._handle_futures(self.futures)
         self.futures.clear()
-        print(f"bulk done, with {i-1} bulks ingested")   
+        
+        # Calculate and log QPS
+        elapsed_time = time.time() - start_time
+        qps = total_docs / elapsed_time if elapsed_time > 0 else 0
+        logger.info(f"Bulk operation completed: {total_docs} documents in {elapsed_time:.2f} seconds")
+        logger.info(f"Bulk QPS: {qps:.2f}")
+        logger.info(f"Total bulks: {total_bulks}")
+        
+        print(f"bulk done, with {i-1} bulks ingested")
+        
+        return {
+            "total_docs": total_docs,
+            "elapsed_time": elapsed_time,
+            "qps": qps,
+            "total_bulks": total_bulks
+        }
 
     def create_index(self, body):
         def run():

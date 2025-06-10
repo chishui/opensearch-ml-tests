@@ -1,5 +1,5 @@
 from basic.doc import Doc
-from basic.index import SparseIndex
+from basic.index import Index, SparseIndex
 from basic import client
 import json
 import time
@@ -9,6 +9,9 @@ from basic.bench import Bench
 import click
 from basic.my_logger import logger
 import statistics
+from sparse.templates import registry
+from sparse.dataset import get_file
+
 
 @click.group()
 def cli():
@@ -65,17 +68,6 @@ def prepare_query():
         fout.write(json.dumps(output))
 
 
-query_template = """
-{
-    "query": {
-        "sparse_ann": {
-            "passage_embedding": {
-                "query_tokens": {{query}}
-            }
-        }
-    }
-}
-"""
 async def run_query(query):
     ret = client.search(body=query, index="test-index")
     profile_results = {
@@ -110,17 +102,6 @@ def simple_progress(current, total):
         logger.info(f'Progress: {percent}% [{current}/{total}]')
 
 
-doc_template = """
-{
-    "passage_embedding": {{embedding}}
-}
-"""
-
-def render_template(template, params):
-    for k, v in params.items():
-        template = template.replace("{{" + k + "}}", v)
-    return json.loads(template)
-
 def sparse_vector_generator(file, size, transform = None):
     from sparse.dataloader import read_sparse_matrix, sparse_vector_to_json
     X = read_sparse_matrix(file)
@@ -139,78 +120,56 @@ def sparse_vector_generator(file, size, transform = None):
 @click.option("--size", help="size", type=int, default=0)
 @click.option("--bulk-size", help="bulk size", type=int, default=1000)
 @click.option("--clients", help="number of clients", type=int, default=1)
-def ingest_msmarco(index_name, data_file, size, bulk_size, clients):
+@click.option("--skip-create-index", is_flag=True, help="Skip index creation")
+def ingest_msmarco(index_name, data_file, size, bulk_size, clients, skip_create_index):
     logger.info(f"Starting ingestion with index={index_name}, data_file={data_file}, size={size}, bulk_size={bulk_size}, clients={clients}")
+    if not skip_create_index:
+        create_index(index_name, data_file)
+
+    # prepare data
+    data_file = get_file(data_file)
+
     bench = Bench(index_name, process_size=clients)
+    
+    # Record start time for QPS calculation
+    start_time = time.time()
+    
+    # Run the bulk operation
     bench.bulk(sparse_vector_generator(data_file, size, 
-                                       lambda v : render_template(doc_template, {"embedding": v})), bulk_size)
-    logger.info("Ingestion completed")
+                                       lambda v : registry.render("document", {"embedding": v})), bulk_size)
+    
+    # Calculate elapsed time and QPS
+    end_time = time.time()
+    elapsed_time = end_time - start_time
+    total_docs = size if size > 0 else "unknown"
+    
+    # Log the results
+    logger.info(f"Ingestion completed in {elapsed_time:.2f} seconds")
+    if isinstance(total_docs, int):
+        qps = total_docs / elapsed_time
+        logger.info(f"Ingestion QPS: {qps:.2f} documents/second")
+
+    # cat count
+    index = Index(index_name)
+    index.count()
 
 
-index_template = """
-{
-  "settings": {
-      "index": {
-          "sparse": true,
-          "number_of_shards": 1
-      }
-  },
-  "mappings": {
-    "properties": {
-      "sparse_embedding":{
-          "type": "rank_features"
-      },
-      "passage_embedding":{
-          "type": "sparse_tokens",
-          "method": {
-              "name": "seismic",
-              "lambda": 20,
-              "alpha": 0.4,
-              "beta": 5
-          }
-      }
-    }
-  }
-}
-"""
-
-sparse_query_template = """
-{  
-    "_source": {
-        "excludes": [
-            "sparse_embedding"
-        ]
-    },
-    "query": {
-        "neural_sparse": {
-            "sparse_embedding": {
-                "query_tokens": {{embedding}}
-            }
-        }
-    },
-    "size": 10
-}
-"""
-
-sparse_ann_query_template = """
-{
-    "_source": false,
-    "query": {
-        "sparse_ann": {
-            "passage_embedding": {
-                "query_tokens": {{embedding}},
-                "cut": {{cut}},
-                "heap_factor": 1.2
-            }
-        }
-    },
-    "size": 10
-}
-"""
-
-def create_index():
-    index = SparseIndex("test-index")
-    index.create(index_template)
+def create_index(index_name, data_file):
+    # check if data_file contains "base_small"
+    index_template = None
+    if "base_small" in data_file:
+        index_template = registry.render("index", {"lambda": 160, "beta": 12, "alpha": 0.4, "doc_reach": 95000})
+    elif "base_full" in data_file:
+        index_template = registry.render("index", {"lambda": 4000, "beta": 400, "alpha": 0.4, "doc_reach": 8800000})
+    if not index_template:
+        logger.error("Invalid data file")
+        return
+    index = SparseIndex(index_name)
+    # try delete first
+    logger.info(f"Deleting index:{index_name}")
+    index.delete()
+    logger.info(f"Creating index:{index_name} with body={index_template}") 
+    index.create(body=index_template)
 
 def query_compare(size):
     bench = Bench("test-index")
@@ -240,6 +199,9 @@ def query_compare(size):
 
 
 def evaluate(data, truth_file, k=10):
+    # prepare data
+    truth_file = get_file(truth_file)
+
     #logger.info(f"Evaluating results against truth file: {truth_file}")
     correct = np.loadtxt(truth_file, delimiter=",").astype(int)
     #logger.info(f"Loaded truth data with shape: {correct.shape}")
@@ -294,7 +256,11 @@ def calculate_latency_stats(results):
 @click.option("--clients", help="number of clients", type=int, default=1)
 @click.option("--start", help="start from query index", type=int, default=0)
 @click.option("--warmup", help="number of warmup queries to run before benchmarking", type=int, default=0)
-def query(index_name, data_file, size, clients, start, warmup):
+@click.option("--truth-file", help="file including correct search results", default='brutal_array.txt')
+def query(index_name, data_file, size, clients, start, warmup, truth_file):
+    # prepare data
+    data_file = get_file(data_file)
+
     logger.info(f"Starting query with index={index_name}, data_file={data_file}, size={size}, clients={clients}, warmup={warmup}")
     bench = Bench(index_name, process_size=clients)
     
@@ -303,7 +269,7 @@ def query(index_name, data_file, size, clients, start, warmup):
         logger.info(f"Running {warmup} warmup queries...")
         # Generate a subset of queries for warmup
         warmup_queries = list(sparse_vector_generator(data_file, min(warmup, size), 
-                                       lambda v : render_template(sparse_ann_query_template, {"embedding": v, "cut": "3"})))
+                                       lambda v : registry.render("sparse_ann_query", {"embedding": v, "cut": "3", "hf": 1.2})))
         
         # Run warmup queries
         warmup_results = bench.search(warmup_queries)
@@ -311,7 +277,7 @@ def query(index_name, data_file, size, clients, start, warmup):
     
     # Run actual benchmark queries
     results = bench.search(sparse_vector_generator(data_file, size, 
-                                       lambda v : render_template(sparse_ann_query_template, {"embedding": v, "cut": "3"})))
+                                       lambda v : registry.render("sparse_ann_query", {"embedding": v, "cut": "3", "hf": 1.2})))
     logger.info(f"Search completed, processing results")
     
     # Calculate and display latency statistics
@@ -332,7 +298,7 @@ def query(index_name, data_file, size, clients, start, warmup):
             one_data.append(int(hit['_id']))
         data.append(one_data if len(one_data) > 0 else [-1])
 
-    evaluate(data, 'brutal_array.txt', k=10)
+    evaluate(data, truth_file, k=10)
 
 
 if __name__ == "__main__":

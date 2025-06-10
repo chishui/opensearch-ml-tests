@@ -5,6 +5,7 @@ from decorator import decorator
 import logging
 
 DEBUG = os.environ.get("DEBUG", "0")
+TIMER = os.environ.get("TIMER", "0")
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO if DEBUG == "0" else logging.DEBUG)
@@ -49,11 +50,15 @@ def is_complete(res):
 @decorator
 def trace(func, *args, **kw):
     logger.debug(f"before run: {func.__module__}:{func.__qualname__}")
+    startTime = time.time()
     res = func(*args, **kw)
+    elapsedTime = time.time() - startTime
+    if TIMER == "1":
+        logger.info(f"{func.__qualname__} elapsed time: {elapsedTime}")
     logger.debug(f"after run: {func.__module__}:{func.__qualname__}")
     logger.debug(f"result: {res}")
     return res
-    
+   
 
 def parser(obj, keys):
     def get(obj, key):
